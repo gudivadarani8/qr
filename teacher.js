@@ -12,8 +12,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (genBtn) genBtn.disabled = false;
   const statusEl = document.getElementById('qr-status');
   if (statusEl) statusEl.innerText = 'Ready — click Generate QR';
-  // Load existing subject assignments (used to display who owns each subject)
-  loadAssignedSubjects().catch(err => console.warn('Failed to load subject assignments', err));
+  // Subject-based assignment disabled — teachers can generate QR for any subject
+  // (loadAssignedSubjects removed as per user request)
   // Load recent sessions so teachers can view attendance
   loadRecentSessions().catch(err => console.warn('Failed to load sessions', err));
 
@@ -134,35 +134,7 @@ function normalizeSubject(subject) {
   return (subject || '').toString().trim().replace(/\s+/g, '_').toUpperCase();
 }
 
-// Load assignments from `subjects` collection and annotate the subject <select>
-async function loadAssignedSubjects() {
-  try {
-    const snapshot = await db.collection('subjects').get();
-    const assignments = {};
-    snapshot.forEach(doc => { assignments[doc.id] = doc.data().teacher; });
-    const select = document.getElementById('subject');
-    if (!select) return;
-    for (let i = 0; i < select.options.length; i++) {
-      const opt = select.options[i];
-      const val = opt.value;
-      if (!val) continue;
-      const id = normalizeSubject(val);
-      if (assignments[id]) {
-        opt.text = `${val} — assigned to ${assignments[id]}`;
-        opt.dataset.assigned = assignments[id];
-      } else {
-        opt.dataset.assigned = '';
-      }
-    }
-  } catch (e) {
-    console.warn('loadAssignedSubjects failed', e);
-  }
-}
-
-// Load recent sessions for the teacher and render them with a View Attendance button
-async function loadRecentSessions() {
-  const el = document.getElementById('sessions-list');
-  if (!el) return;
+// Subject assignment feature removed — teachers may generate QR for any subject
   el.innerText = 'Loading...';
   try {
     const snapshot = await db.collection('sessions').orderBy('createdAt', 'desc').limit(10).get();
@@ -281,24 +253,7 @@ async function generateQR() {
 
   const subjectId = normalizeSubject(subject);
 
-  try {
-    const subjRef = db.collection('subjects').doc(subjectId);
-    const subjDoc = await subjRef.get();
-    if (subjDoc.exists) {
-      const assigned = subjDoc.data().teacher;
-      if (assigned !== teacher) {
-        alert(`Subject "${subject}" is assigned to ${assigned}. Only that faculty can generate or open QR for this subject.`);
-        return;
-      }
-    } else {
-      // First assignment — create a permanent subject -> teacher mapping
-      await subjRef.set({ teacher, subject, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-    }
-  } catch (e) {
-    console.warn('Failed to verify/create subject assignment', e);
-    alert('Failed to verify subject assignment — see console');
-    return;
-  }
+  // Subject ownership checks removed — any teacher can generate a QR for any subject.
 
   // 🔹 Create session
   const sessionId = "session_" + Date.now();
