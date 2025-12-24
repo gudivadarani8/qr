@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>QR Attendance - Teacher</title>
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+  <!-- QR -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js"></script>
+  <!-- HTML5 QR Scanner -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js"></script>
+  
+
+</head>
+
+<body>
+  <h2>Generate Attendance QR</h2>
+
+
+
+  <input id="teacher" placeholder="Teacher Name"><br><br>
+  <input id="class" placeholder="Class"><br><br>
+  <label for="subject">Subject:</label>
+  <select id="subject">
+    <option value="">-- Select Subject --</option>
+    <option value="AI">AI</option>
+    <option value="CNS">CNS</option>
+    <option value="CN">CN</option>
+    <option value="TQM">TQM</option>
+    <option value="CS">CS</option>
+    <option value="SPM">SPM</option>
+    <option value="SOFTSKILLS">SOFTSKILLS</option>
+    <option value="CN LAB">CN LAB</option>
+    <option value="AI LAB">AI LAB</option>
+  </select><br><br>
+
+  <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:8px;">
+    <button onclick="generateQR()">Generate QR</button>
+    <button id="scan-btn" onclick="startScan()">Scan QR</button>
+    <button id="stop-scan-btn" onclick="stopScan()" style="display:none;">Stop Scan</button>
+  </div>
+
+  <div style="margin-top:8px;color:#333;">
+    <label style="font-size:0.95em;"><input type="checkbox" id="enable-custom-url"> Advanced: use custom public URL</label>
+    <div id="custom-url-row" style="margin-top:8px;display:none;">
+      <input id="custom-base-url" placeholder="https://example.com/" style="width:100%" />
+      <small style="color:#666;display:block;margin-top:6px;">Only enable when you have a public URL accessible by student devices. The URL must start with https:// or http://.</small>
+    </div>
+  </div>
+
+  <div id="qrcode"></div>
+
+  <!-- Visual countdown & progress bar (fills as time remains) -->
+  <div id="qr-meta" style="margin-top:8px;">
+    <div id="qr-countdown" style="font-weight:bold;color:#333;">No QR generated</div>
+    <div id="qr-progress" style="width:100%;height:10px;background:#eee;border-radius:6px;margin-top:6px;overflow:hidden;">
+      <div id="qr-progress-fill" style="width:0%;height:100%;background:#4caf50;transition:width 0.4s linear;"></div>
+    </div>
+  </div>
+
+  <div id="qr-reader" style="display:none;margin-top:12px;"></div>
+  <div id="scan-result" style="margin-top:8px;color:#333;"></div>
+
+  <!-- Quick scanning tips (help with common mobile scanning issues):
+    - Size & Contrast: Make QR at least 150–300px and high contrast (dark on light).
+    - HTTPS: Use an HTTPS absolute URL so mobile cameras/openers accept it reliably.
+    - Permissions: On Android/Chrome allow Camera permission; use "Stop Scan" if stuck.
+    - Lighting & Focus: Ensure sufficient light and steady camera for best results.
+    These items are also described in SCANNING_GUIDE.md for more details.
+  -->
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const cb = document.getElementById('enable-custom-url');
+      const row = document.getElementById('custom-url-row');
+      if (!cb || !row) return;
+      cb.addEventListener('change', () => { row.style.display = cb.checked ? 'block' : 'none'; });
+    });
+  </script>
+  <div id="qr-status" style="margin-top:8px;color:#333;font-weight:bold;">Ready — click Generate QR</div>
+  <div id="generated-url" style="margin-top:6px;color:#555;font-size:0.9em;"></div>
+
+  <div id="qr-actions" style="display:none;margin-top:8px;">
+    <label style="font-size:0.9em;">Upload QR image: <input id="qr-upload" type="file" accept="image/*" /></label>
+    <div id="qr-action-msg" style="margin-top:6px;color:#333;font-size:0.9em;"></div>
+  </div>
+
+  <script src="firebase.js"></script>
+  <script src="teacher.js"></script>
+</body>
+</html>

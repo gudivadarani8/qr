@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mark Attendance</title>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+
+  <style>
+    body { font-family: system-ui, Arial; padding: 16px; }
+    label { display:block; margin-top:8px; }
+    input { padding:8px; width:100%; max-width:360px; box-sizing:border-box }
+    button { margin-top:12px; padding:10px 14px }
+    #status { margin-bottom:6px; font-weight:bold }
+    #timer { color:#333 }
+    #msg { margin-top:12px; font-weight:600 }
+    .muted { color:#666; font-size:0.9em }
+  </style>
+</head>
+<body>
+  <h2>Mark Attendance</h2>
+
+  <div id="status">Checking session...</div>
+  <div id="timer" class="muted"></div>
+
+  <form id="attendanceForm" style="display:none; max-width:420px;">
+    <label>Roll Number
+      <input id="roll" name="roll" type="text" required placeholder="Roll Number" />
+    </label>
+    <label>Name
+      <input id="name" name="name" type="text" required placeholder="Your full name" />
+    </label>
+    <button type="submit">Submit Attendance</button>
+  </form>
+
+  <p id="msg"></p>
+
+  <p class="muted">Note: This QR expires exactly after 5 minutes. If you see "Expired", contact your teacher to generate a new QR.</p>
+
+  <!-- Optional: link to guide on common scanning problems -->
+  <p class="muted"><a href="SCANNING_GUIDE.md" target="_blank" rel="noopener">Scanning tips & troubleshooting</a></p>
+
+  <script src="firebase.js"></script>
+  <script src="student.js"></script>
+
+  <script>
+    // Clean student workflow: validate session existence and expiry, show countdown
+    (function(){
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session');
+      const statusEl = document.getElementById('status');
+      const timerEl = document.getElementById('timer');
+      const formEl = document.getElementById('attendanceForm');
+      const msgEl = document.getElementById('msg');
+
+      if (!sessionId) {
+        statusEl.innerText = 'Invalid QR';
+        msgEl.innerText = 'This QR is not valid.';
+        return;
+      }
+
+      const sessionRef = db.collection('sessions').doc(sessionId);
+      let sessionData = null;
+      let countdownInterval = null;
+
+      function stopCountdown() {
+        if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+      }
+
+      function startCountdown(expiryMs) {
+        function update() {
+          const now = Date.now();
+          const diff = expiryMs - now;
+          if (diff <= 0) {
+            timerEl.innerText = 'EXPIRED';
+            statusEl.innerText = 'Attendance closed';
+            formEl.style.display = 'none';
+            stopCountdown();
+            return;
+          }
+          const min = Math.floor(diff / 60000);
+          const sec = Math.floor((diff % 60000) / 1000);
+          timerEl.innerText = `${min}:${sec.toString().padStart(2,'0')}`;
+        }
+        update();
+        countdownInterval = setInterval(update, 1000);
+      }
+
+      // Fetch session and render
+      sessionRef.get().then(doc => {
+        if (!doc.exists) {
+          statusEl.innerText = 'Session not found';
+          msgEl.innerText = 'The attendance session does not exist or was removed.';
+          return;
+        }
+
+        sessionData = doc.data();
+
+        // Validate expiry using server-saved numeric ms field `expiryTimeMs`
+        const expiryMs = sessionData.expiryTimeMs || (sessionData.expiryAt && sessionData.expiryAt.toMillis && sessionData.expiryAt.toMillis()) || null;
+
+        if (!expiryMs) {
+          statusEl.innerText = 'Invalid session data';
+          msgEl.innerText = 'Session is missing expiry information. Contact your teacher.';
+          return;
+        }
+
+        if (Date.now() > expiryMs || sessionData.expired) {
+          statusEl.innerText = 'EXPIRED';
+          msgEl.innerText = 'This QR has expired.';
+          return;
+        }
+
+        // Session valid — show form and start countdown
+        statusEl.innerText = `Class: ${sessionData.class || '?'}, Subject: ${sessionData.subject || '?'} — Active`;
+        formEl.style.display = 'block';
+        startCountdown(expiryMs);
+
+        // Wire up form submit to student.js markAttendance
+        formEl.addEventListener('submit', function(e){
+          e.preventDefault();
+          document.getElementById('msg').innerText = 'Submitting...';
+          markAttendance();
+        });
+      }).catch(err => {
+        console.error('Error getting session', err);
+        statusEl.innerText = 'Error';
+        msgEl.innerText = 'Unable to load session. Try again or contact the teacher.';
+      });
+
+      // Also listen for realtime session expiry changes (optional)
+      sessionRef.onSnapshot(snap => {
+        if (!snap.exists) return;
+        const sd = snap.data();
+        if (sd.expired) {
+          statusEl.innerText = 'EXPIRED';
+          msgEl.innerText = 'Session has been closed by the teacher.';
+          formEl.style.display = 'none';
+          stopCountdown();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
+

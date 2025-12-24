@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Teacher Login - QR Attendance</title>
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Firebase (App, Auth, Firestore) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-firestore.js"></script>
+</head>
+<body>
+  <h2>Teacher Login</h2>
+
+  <div id="auth-msg" style="color:#d32f2f;margin-bottom:8px;"></div>
+
+  <input id="email" placeholder="Email" style="width:100%"><br><br>
+  <input id="password" placeholder="Password" type="password" style="width:100%"><br><br>
+
+  <button id="signin-btn">Sign In</button>
+  <button id="register-btn">Register (create teacher account)</button>
+
+  <p style="margin-top:16px;color:#555;">After signing in you will be redirected to the Teacher page to generate QR codes.</p>
+
+  <p><a href="index.html">Back to Teacher page</a></p>
+
+  <script>
+    // Teacher login removed — redirect back to Teacher page
+    setTimeout(() => { window.location.href = 'index.html'; }, 800);
+  </script>
+  <script src="firebase.js"></script>
+  <script src="teacher-auth.js"></script>
+</body>
+</html><!DOCTYPE html>
+<html>
+<head>
+  <title>Generate QR</title>
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js"></script>
+</head>
+<body>
+
+<button onclick="generateQR()">Generate QR (5 min)</button>
+<p id="expiryInfo"></p>
+<div id="qrcode"></div>
+
+<script>
+function generateQR() {
+  const sessionId = "session_" + Date.now();
+  const createdAt = Date.now();
+  const expiresAt = createdAt + (5 * 60 * 1000); // 5 minutes
+
+  // Store session (Firebase / DB recommended)
+  localStorage.setItem(sessionId, JSON.stringify({
+    createdAt,
+    expiresAt
+  }));
+
+  const url = `${location.origin}/student.html?session=${sessionId}`;
+
+  document.getElementById("qrcode").innerHTML = "";
+  new QRCode(document.getElementById("qrcode"), {
+    text: url,
+    width: 256,
+    height: 256
+  });
+
+  document.getElementById("expiryInfo").innerText =
+    "QR expires at: " + new Date(expiresAt).toLocaleTimeString();
+}
+</script>
+
+</body>
+</html>
