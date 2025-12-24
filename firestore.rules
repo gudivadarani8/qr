@@ -5,7 +5,9 @@ service cloud.firestore {
     // Sessions are readable by clients so they can show live countdowns
     match /sessions/{sessionId} {
       allow read: if true;
-      allow create: if true; // teachers (or trusted processes) create sessions
+      // Allow create unless the supplied subjectId already exists and is owned by a different teacher
+      allow create: if !(request.resource.data.subjectId is string && exists(/databases/$(database)/documents/subjects/$(request.resource.data.subjectId))
+                          && get(/databases/$(database)/documents/subjects/$(request.resource.data.subjectId)).data.teacher != request.resource.data.teacher);
       allow update: if true; // allow marking expired or admin updates
 
       // Attendance docs: one document per roll number inside the session
@@ -22,6 +24,15 @@ service cloud.firestore {
 
         allow read: if true;
       }
+    }
+
+    // Subjects collection stores assignment of subject -> teacher and is create-only
+    match /subjects/{subjectId} {
+      allow read: if true;
+      // Only allow creation when the document does not already exist (prevents reassignments via client)
+      allow create: if !exists(/databases/$(database)/documents/subjects/$(subjectId));
+      allow update, delete: if false;
+    }
 
       // Devices collection records which client/device marked attendance (used
       // to prevent the same device from marking multiple different rolls). Creation

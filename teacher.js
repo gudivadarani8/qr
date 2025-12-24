@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (genBtn) genBtn.disabled = false;
   const statusEl = document.getElementById('qr-status');
   if (statusEl) statusEl.innerText = 'Ready — click Generate QR';
+  // Load existing subject assignments (used to display who owns each subject)
+  loadAssignedSubjects().catch(err => console.warn('Failed to load subject assignments', err));
 
   // Wire stop-scan UI if present
   const stopBtn = document.getElementById('stop-scan-btn');
@@ -121,17 +123,75 @@ function stopScan() {
   });
 }
 
-function handleScanResult(text) {
+// Normalize subject into a stable document id
+function normalizeSubject(subject) {
+  return (subject || '').toString().trim().replace(/\s+/g, '_').toUpperCase();
+}
+
+// Load assignments from `subjects` collection and annotate the subject <select>
+async function loadAssignedSubjects() {
+  try {
+    const snapshot = await db.collection('subjects').get();
+    const assignments = {};
+    snapshot.forEach(doc => { assignments[doc.id] = doc.data().teacher; });
+    const select = document.getElementById('subject');
+    if (!select) return;
+    for (let i = 0; i < select.options.length; i++) {
+      const opt = select.options[i];
+      const val = opt.value;
+      if (!val) continue;
+      const id = normalizeSubject(val);
+      if (assignments[id]) {
+        opt.text = `${val} — assigned to ${assignments[id]}`;
+        opt.dataset.assigned = assignments[id];
+      } else {
+        opt.dataset.assigned = '';
+      }
+    }
+  } catch (e) {
+    console.warn('loadAssignedSubjects failed', e);
+  }
+} 
+
+async function handleScanResult(text) {
   // stop scanning immediately for cleaner UX
   try { stopScan(); } catch (e) { console.warn(e); }
 
   const scanResultEl = document.getElementById('scan-result');
   if (scanResultEl) scanResultEl.innerText = 'Scanned: ' + text;
 
-  // If scanned text looks like the student URL, open it in a new tab
+  // If scanned text looks like the student URL, validate session ownership before opening
   try {
     const parsed = new URL(text, location.href);
-    if (parsed.pathname.endsWith('student.html') || parsed.searchParams.has('session')) {
+    const sessionId = parsed.searchParams.get('session');
+    if (parsed.pathname.endsWith('student.html') || sessionId) {
+      // Require teacher name to be filled so we can verify ownership
+      const currentTeacher = (document.getElementById('teacher') && document.getElementById('teacher').value || '').trim();
+      if (!currentTeacher) {
+        alert('Enter your teacher name in the "Teacher" box before scanning a QR to verify ownership.');
+        return;
+      }
+
+      if (sessionId) {
+        try {
+          const doc = await db.collection('sessions').doc(sessionId).get();
+          if (!doc.exists) {
+            alert('Session not found in database.');
+            return;
+          }
+          const data = doc.data();
+          // If session has subjectId or teacher stored, ensure it matches current teacher
+          if (data.teacher && data.teacher !== currentTeacher) {
+            alert(`Unauthorized: this session belongs to ${data.teacher}. Only the assigned faculty can open it.`);
+            return;
+          }
+        } catch (e) {
+          console.error('Failed to validate session ownership', e);
+          alert('Failed to validate session ownership — see console for details');
+          return;
+        }
+      }
+
       // Ensure link is absolute (many mobile scanners require https absolute URLs)
       window.open(parsed.href, '_blank');
       return;
@@ -142,15 +202,36 @@ function handleScanResult(text) {
 
   // Otherwise copy to clipboard for convenience
   if (navigator.clipboard) navigator.clipboard.writeText(text).catch(()=>{});
-}
+} 
 
-function generateQR() {
-  const teacher = document.getElementById("teacher").value.trim();
-  const className = document.getElementById("class").value.trim();
-  const subject = document.getElementById("subject").value;
+async function generateQR() {
+  const teacher = (document.getElementById("teacher").value || '').trim();
+  const className = (document.getElementById("class").value || '').trim();
+  const subject = (document.getElementById("subject").value || '').trim();
 
   if (!teacher || !className || !subject) {
     alert("Please fill all fields");
+    return;
+  }
+
+  const subjectId = normalizeSubject(subject);
+
+  try {
+    const subjRef = db.collection('subjects').doc(subjectId);
+    const subjDoc = await subjRef.get();
+    if (subjDoc.exists) {
+      const assigned = subjDoc.data().teacher;
+      if (assigned !== teacher) {
+        alert(`Subject "${subject}" is assigned to ${assigned}. Only that faculty can generate or open QR for this subject.`);
+        return;
+      }
+    } else {
+      // First assignment — create a permanent subject -> teacher mapping
+      await subjRef.set({ teacher, subject, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    }
+  } catch (e) {
+    console.warn('Failed to verify/create subject assignment', e);
+    alert('Failed to verify subject assignment — see console');
     return;
   }
 
@@ -309,12 +390,13 @@ function generateQR() {
     teacher,
     class: className,
     subject,
+    subjectId,
     createdAt: firebase.firestore.Timestamp.fromMillis(now),
     expiryTimeMs: expiryMs,
     expiryAt: firebase.firestore.Timestamp.fromMillis(expiryMs),
     expired: false
   });
-}
+} 
 
 /*
   NOTES ABOUT COMMON SCAN FAILURES (and how this code helps):
