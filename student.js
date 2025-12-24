@@ -46,52 +46,62 @@ function markAttendance() {
 
     const clientId = getClientId();
     const deviceRef = sessionRef.collection("devices").doc(clientId);
+    const attendanceRef = sessionRef.collection("attendance").doc(roll);
 
-    // Check whether this device has already been used for another roll
-    deviceRef.get().then(devDoc => {
-      if (devDoc.exists && devDoc.data().roll !== roll) {
-        document.getElementById("msg").innerText = "This device already marked attendance for roll " + devDoc.data().roll;
-        return;
+    // Use a transaction to atomically ensure: session not expired, device not used, attendance not present
+    db.runTransaction(async (tx) => {
+      const sDoc = await tx.get(sessionRef);
+      if (!sDoc.exists) throw new Error('SessionNotFound');
+
+      const sData = sDoc.data();
+      const expiryMs = sData.expiryTimeMs || (sData.expiryAt && sData.expiryAt.toMillis && sData.expiryAt.toMillis()) || 0;
+      if (Date.now() > expiryMs || sData.expired) throw new Error('SessionExpired');
+
+      const devDoc = await tx.get(deviceRef);
+      if (devDoc.exists) {
+        // Device already used — prevent multiple attendances from same device
+        const existingRoll = devDoc.data() && devDoc.data().roll ? devDoc.data().roll : 'unknown';
+        throw new Error('DeviceAlreadyUsed:' + existingRoll);
       }
 
-      const attendanceRef = sessionRef.collection("attendance").doc(roll);
+      const attDoc = await tx.get(attendanceRef);
+      if (attDoc.exists) {
+        throw new Error('AttendanceExists');
+      }
 
-      // Prevent overwriting an existing attendance and show a clearer message
-      attendanceRef.get().then(attDoc => {
-        if (attDoc.exists) {
-          document.getElementById("msg").innerText = "Attendance already marked for this roll";
-          return;
-        }
-
-        // Use a batch so both attendance and device docs are written atomically.
-        // Use serverTimestamp so records reflect server time and not the client's clock.
-        const batch = db.batch();
-        batch.set(attendanceRef, {
-          name: name,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-          clientId: clientId
-        });
-
-        batch.set(deviceRef, {
-          roll: roll,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        batch.commit().then(() => {
-          document.getElementById("msg").innerText = "Attendance marked ✅";
-        }).catch(err => {
-          console.error(err);
-          document.getElementById("msg").innerText = "Error saving attendance";
-        });
-
-      }).catch(err => {
-        console.error(err);
-        document.getElementById("msg").innerText = "Error checking attendance";
+      // Both checks passed — create attendance and device docs atomically
+      tx.set(attendanceRef, {
+        name: name,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        clientId: clientId
       });
 
+      tx.set(deviceRef, {
+        roll: roll,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+    }).then(() => {
+      document.getElementById("msg").innerText = "Attendance marked ✅";
+      // Optionally hide the form to prevent re-submission
+      const form = document.getElementById('attendanceForm');
+      if (form) form.style.display = 'none';
     }).catch(err => {
-      console.error(err);
-      document.getElementById("msg").innerText = "Error checking device";
+      console.error('Transaction failed', err);
+      const msg = document.getElementById("msg");
+      if (!msg) return;
+      if (err.message && err.message.startsWith('DeviceAlreadyUsed')) {
+        const existingRoll = err.message.split(':')[1] || '';
+        msg.innerText = 'This device already marked attendance for roll ' + existingRoll;
+      } else if (err.message === 'AttendanceExists') {
+        msg.innerText = 'Attendance already marked for this roll';
+      } else if (err.message === 'SessionExpired') {
+        msg.innerText = 'Session expired ⌛';
+      } else if (err.message === 'SessionNotFound') {
+        msg.innerText = 'Invalid session';
+      } else {
+        msg.innerText = 'Error saving attendance';
+      }
     });
 
   })

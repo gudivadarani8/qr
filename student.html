@@ -113,16 +113,42 @@
           return;
         }
 
-        // Session valid — show form and start countdown
-        statusEl.innerText = `Class: ${sessionData.class || '?'}, Subject: ${sessionData.subject || '?'} — Active`;
-        formEl.style.display = 'block';
-        startCountdown(expiryMs);
+        // Session valid — before showing form, check whether this device already marked attendance
+        const clientId = getClientId();
+        const deviceDocRef = sessionRef.collection('devices').doc(clientId);
 
-        // Wire up form submit to student.js markAttendance
-        formEl.addEventListener('submit', function(e){
-          e.preventDefault();
-          document.getElementById('msg').innerText = 'Submitting...';
-          markAttendance();
+        deviceDocRef.get().then(devSnap => {
+          if (devSnap.exists) {
+            // Device already used — disable form and show a clear message
+            const d = devSnap.data() || {};
+            statusEl.innerText = `This device has already marked attendance (roll: ${d.roll || 'unknown'})`;
+            msgEl.innerText = 'This device has already been used for attendance and cannot be used again for this session.';
+            formEl.style.display = 'none';
+            return;
+          }
+
+          // Device not used — show form and start countdown
+          statusEl.innerText = `Class: ${sessionData.class || '?'}, Subject: ${sessionData.subject || '?'} — Active`;
+          formEl.style.display = 'block';
+          startCountdown(expiryMs);
+
+          // Wire up form submit to student.js markAttendance
+          formEl.addEventListener('submit', function(e){
+            e.preventDefault();
+            document.getElementById('msg').innerText = 'Submitting...';
+            markAttendance();
+          });
+        }).catch(err => {
+          console.error('Device check failed', err);
+          // Fallback: allow form but warn
+          statusEl.innerText = `Class: ${sessionData.class || '?'}, Subject: ${sessionData.subject || '?'} — Active`;
+          formEl.style.display = 'block';
+          startCountdown(expiryMs);
+          formEl.addEventListener('submit', function(e){
+            e.preventDefault();
+            document.getElementById('msg').innerText = 'Submitting...';
+            markAttendance();
+          });
         });
       }).catch(err => {
         console.error('Error getting session', err);
