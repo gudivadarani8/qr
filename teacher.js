@@ -2,6 +2,10 @@ let qrTimer = null;
 let html5QrCode = null; // scanner instance
 let lastScanned = { text: null, at: 0 };
 
+// Track last created session and active attendance listener
+let lastSessionId = null;
+let attendanceUnsub = null;
+
 // Ensure UI is ready and wire up elements
 document.addEventListener('DOMContentLoaded', () => {
   const genBtn = document.querySelector('button[onclick="generateQR()"]');
@@ -10,6 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
   if (statusEl) statusEl.innerText = 'Ready — click Generate QR';
   // Load existing subject assignments (used to display who owns each subject)
   loadAssignedSubjects().catch(err => console.warn('Failed to load subject assignments', err));
+  // Load recent sessions so teachers can view attendance
+  loadRecentSessions().catch(err => console.warn('Failed to load sessions', err));
 
   // Wire stop-scan UI if present
   const stopBtn = document.getElementById('stop-scan-btn');
@@ -151,7 +157,66 @@ async function loadAssignedSubjects() {
   } catch (e) {
     console.warn('loadAssignedSubjects failed', e);
   }
-} 
+}
+
+// Load recent sessions for the teacher and render them with a View Attendance button
+async function loadRecentSessions() {
+  const el = document.getElementById('sessions-list');
+  if (!el) return;
+  el.innerText = 'Loading...';
+  try {
+    const snapshot = await db.collection('sessions').orderBy('createdAt', 'desc').limit(10).get();
+    if (snapshot.empty) {
+      el.innerText = 'No recent sessions';
+      return;
+    }
+    el.innerHTML = '';
+    snapshot.forEach(doc => {
+      const d = doc.data() || {};
+      const div = document.createElement('div');
+      div.style.border = '1px solid #eee'; div.style.padding = '8px'; div.style.marginBottom = '8px';
+      const created = d.createdAt && d.createdAt.toDate ? d.createdAt.toDate().toLocaleString() : '';
+      const status = d.expired ? 'Expired' : 'Active';
+      div.innerHTML = `<strong>${d.subject || '—'}</strong> | Class: ${d.class || '—'} | Teacher: ${d.teacher || '—'} <br><small>${created} • ${status}</small>`;
+      const viewBtn = document.createElement('button'); viewBtn.innerText = 'View Attendance'; viewBtn.style.marginLeft = '8px';
+      viewBtn.onclick = () => showAttendance(doc.id);
+      div.appendChild(viewBtn);
+      el.appendChild(div);
+    });
+  } catch (e) {
+    console.error('Failed to load sessions', e);
+    el.innerText = 'Failed to load sessions';
+  }
+}
+
+// Show attendance for a session and subscribe to live updates
+function showAttendance(sessionId) {
+  // unsubscribe previous listener if present
+  if (attendanceUnsub) { attendanceUnsub(); attendanceUnsub = null; }
+  const panel = document.getElementById('attendance-panel');
+  const heading = document.getElementById('attendance-heading');
+  const list = document.getElementById('attendance-list');
+  if (!panel || !heading || !list) return;
+  panel.style.display = 'block';
+  heading.innerText = 'Attendance for session: ' + sessionId;
+  list.innerHTML = 'Loading...';
+
+  const attendanceRef = db.collection('sessions').doc(sessionId).collection('attendance').orderBy('timestamp', 'asc');
+  attendanceUnsub = attendanceRef.onSnapshot(snap => {
+    if (snap.empty) { list.innerHTML = '<li>No attendance yet</li>'; return; }
+    list.innerHTML = '';
+    snap.forEach(doc => {
+      const d = doc.data() || {};
+      const ts = d.timestamp && d.timestamp.toDate ? d.timestamp.toDate().toLocaleString() : '';
+      const li = document.createElement('li');
+      li.innerText = `${doc.id} — ${d.name || ''}${ts ? ' • ' + ts : ''}`;
+      list.appendChild(li);
+    });
+  }, err => {
+    console.error('Attendance snapshot failed', err);
+    list.innerHTML = '<li>Error loading attendance</li>';
+  });
+}
 
 async function handleScanResult(text) {
   // stop scanning immediately for cleaner UX
@@ -386,16 +451,24 @@ async function generateQR() {
   }, 1000);
 
   // 💾 Save session to Firebase with both numeric ms and Timestamp so rules and clients can validate
-  db.collection("sessions").doc(sessionId).set({
-    teacher,
-    class: className,
-    subject,
-    subjectId,
-    createdAt: firebase.firestore.Timestamp.fromMillis(now),
-    expiryTimeMs: expiryMs,
-    expiryAt: firebase.firestore.Timestamp.fromMillis(expiryMs),
-    expired: false
-  });
+  try {
+    await db.collection("sessions").doc(sessionId).set({
+      teacher,
+      class: className,
+      subject,
+      subjectId,
+      createdAt: firebase.firestore.Timestamp.fromMillis(now),
+      expiryTimeMs: expiryMs,
+      expiryAt: firebase.firestore.Timestamp.fromMillis(expiryMs),
+      expired: false
+    });
+    // remember & show attendance for this session and refresh session list
+    lastSessionId = sessionId;
+    showAttendance(sessionId);
+    loadRecentSessions().catch(()=>{});
+  } catch (e) {
+    console.error('Failed to create session', e);
+  }
 } 
 
 /*

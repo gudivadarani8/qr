@@ -20,4 +20,19 @@ const db = firebase.firestore();
 // (In this simple static app we use global vars; keep this file minimal.)
 window.db = db;
 window.firebase = firebase;
+async function saveAttendance(sessionId, studentId, studentName) {
+  try {
+    const attRef = db.collection('sessions').doc(sessionId).collection('attendance').doc(studentId);
+    const snap = await attRef.get();
+    if (snap.exists) {
+      document.getElementById("msg").innerText = "Attendance already recorded ❌";
+      return;
+    }
+    await attRef.set({ name: studentName, timestamp: firebase.firestore.FieldValue.serverTimestamp() });
+    document.getElementById("msg").innerText = "Attendance submitted successfully ✅";
+  } catch (e) {
+    console.error('saveAttendance failed', e);
+    document.getElementById("msg").innerText = "Error saving attendance";
+  }
+}
 
